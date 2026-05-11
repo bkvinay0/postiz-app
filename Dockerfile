@@ -4,11 +4,13 @@ WORKDIR /app
 
 RUN corepack enable
 
+ENV NODE_OPTIONS="--max-old-space-size=2048"
+
 COPY . .
 
 RUN pnpm install --frozen-lockfile
 
-ENV NODE_OPTIONS="--max-old-space-size=1024"
+RUN pnpm add -g @nestjs/cli
 
 RUN pnpm run build:backend
 

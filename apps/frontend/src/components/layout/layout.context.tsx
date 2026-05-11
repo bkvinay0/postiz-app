@@ -28,7 +28,8 @@ function LayoutContextInner(params: { children: ReactNode }) {
     async (url: string, options: RequestInit, response: Response) => {
       if (
         typeof window !== 'undefined' &&
-        window.location.href.includes('/p/')
+        (window.location.href.includes('/p/') ||
+          window.location.pathname.startsWith('/provider/'))
       ) {
         return true;
       }
@@ -73,11 +74,13 @@ function LayoutContextInner(params: { children: ReactNode }) {
           : '/analytics?onboarding=true';
         return true;
       }
+
       if (response?.headers?.get('reload')) {
         window.location.reload();
         return true;
       }
-      if (response.status === 401) {
+
+      if (response.status === 401 || response?.headers?.get('logout')) {
         if (!isSecured) {
           setCookie('auth', '', -10);
           setCookie('showorg', '', -10);

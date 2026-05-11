@@ -42,7 +42,7 @@ export class DiscordProvider extends SocialAbstract implements SocialProvider {
     ).json();
 
     const { application } = await (
-      await fetch('https://discord.com/api/oauth2/@me', {
+      await this.fetch('https://discord.com/api/oauth2/@me', {
         headers: {
           Authorization: `Bearer ${access_token}`,
         },
@@ -99,7 +99,7 @@ export class DiscordProvider extends SocialAbstract implements SocialProvider {
     this.checkScopes(this.scopes, scope.split(' '));
 
     const { application } = await (
-      await fetch('https://discord.com/api/oauth2/@me', {
+      await this.fetch('https://discord.com/api/oauth2/@me', {
         headers: {
           Authorization: `Bearer ${access_token}`,
         },
@@ -120,7 +120,7 @@ export class DiscordProvider extends SocialAbstract implements SocialProvider {
   @Tool({ description: 'Channels', dataSchema: [] })
   async channels(accessToken: string, params: any, id: string) {
     const list = await (
-      await fetch(`https://discord.com/api/guilds/${id}/channels`, {
+      await this.fetch(`https://discord.com/api/guilds/${id}/channels`, {
         headers: {
           Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN_ID}`,
         },
@@ -140,11 +140,76 @@ export class DiscordProvider extends SocialAbstract implements SocialProvider {
     accessToken: string,
     postDetails: PostDetails[]
   ): Promise<PostResponse[]> {
-    let channel = postDetails[0].settings.channel;
-    if (postDetails.length > 1) {
+    const [firstPost] = postDetails;
+    const channel = firstPost.settings.channel;
+
+    const form = new FormData();
+    form.append(
+      'payload_json',
+      JSON.stringify({
+        content: firstPost.message.replace(/\[\[\[(@.*?)]]]/g, (match, p1) => {
+          return `<${p1}>`;
+        }),
+        attachments: firstPost.media?.map((p, index) => ({
+          id: index,
+          description: `Picture ${index}`,
+          filename: p.path.split('/').pop(),
+        })),
+      })
+    );
+
+    let index = 0;
+    for (const media of firstPost.media || []) {
+      const loadMedia = await fetch(media.path);
+
+      form.append(
+        `files[${index}]`,
+        await loadMedia.blob(),
+        media.path.split('/').pop()
+      );
+      index++;
+    }
+
+    const data = await (
+      await this.fetch(`https://discord.com/api/channels/${channel}/messages`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN_ID}`,
+        },
+        body: form,
+      })
+    ).json();
+
+    return [
+      {
+        id: firstPost.id,
+        releaseURL: `https://discord.com/channels/${id}/${channel}/${data.id}`,
+        postId: data.id,
+        status: 'success',
+      },
+    ];
+  }
+
+  async comment(
+    id: string,
+    postId: string,
+    lastCommentId: string | undefined,
+    accessToken: string,
+    postDetails: PostDetails[],
+    integration: Integration
+  ): Promise<PostResponse[]> {
+    const [commentPost] = postDetails;
+    const channel = commentPost.settings.channel;
+
+    // For Discord, we create a thread from the original message for comments
+    // If we don't have a thread yet, create one
+    let threadChannel = channel;
+
+    // Create thread if this is the first comment
+    if (!lastCommentId) {
       const { id: threadId } = await (
-        await fetch(
-          `https://discord.com/api/channels/${postDetails[0].settings.channel}/threads`,
+        await this.fetch(
+          `https://discord.com/api/channels/${channel}/messages/${postId}/threads`,
           {
             method: 'POST',
             headers: {
@@ -152,69 +217,68 @@ export class DiscordProvider extends SocialAbstract implements SocialProvider {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              name: postDetails[0].message,
+              name: 'Thread',
               auto_archive_duration: 1440,
-              type: 11, // Public thread type
             }),
           }
         )
       ).json();
-      channel = threadId;
+      threadChannel = threadId;
     }
 
-    const finalData = [];
-    for (const post of postDetails) {
-      const form = new FormData();
-      form.append(
-        'payload_json',
-        JSON.stringify({
-          content: post.message.replace(/\[\[\[(@.*?)]]]/g, (match, p1) => {
+    const form = new FormData();
+    form.append(
+      'payload_json',
+      JSON.stringify({
+        content: commentPost.message.replace(/\[\[\[(@.*?)]]]/g, (match, p1) => {
             return `<${p1}>`;
-          }),
-          attachments: post.media?.map((p, index) => ({
-            id: index,
-            description: `Picture ${index}`,
-            filename: p.path.split('/').pop(),
-          })),
-        })
+        }),
+        attachments: commentPost.media?.map((p, index) => ({
+          id: index,
+          description: `Picture ${index}`,
+          filename: p.path.split('/').pop(),
+        })),
+      })
+    );
+
+    let index = 0;
+    for (const media of commentPost.media || []) {
+      const loadMedia = await fetch(media.path);
+
+      form.append(
+        `files[${index}]`,
+        await loadMedia.blob(),
+        media.path.split('/').pop()
       );
+      index++;
+    }
 
-      let index = 0;
-      for (const media of post.media || []) {
-        const loadMedia = await fetch(media.path);
-
-        form.append(
-          `files[${index}]`,
-          await loadMedia.blob(),
-          media.path.split('/').pop()
-        );
-        index++;
-      }
-
-      const data = await (
-        await fetch(`https://discord.com/api/channels/${channel}/messages`, {
+    const data = await (
+      await this.fetch(
+        `https://discord.com/api/channels/${threadChannel}/messages`,
+        {
           method: 'POST',
           headers: {
             Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN_ID}`,
           },
           body: form,
-        })
-      ).json();
+        }
+      )
+    ).json();
 
-      finalData.push({
-        id: post.id,
-        releaseURL: `https://discord.com/channels/${id}/${channel}/${data.id}`,
+    return [
+      {
+        id: commentPost.id,
+        releaseURL: `https://discord.com/channels/${id}/${threadChannel}/${data.id}`,
         postId: data.id,
         status: 'success',
-      });
-    }
-
-    return finalData;
+      },
+    ];
   }
 
   async changeNickname(id: string, accessToken: string, name: string) {
     await (
-      await fetch(`https://discord.com/api/guilds/${id}/members/@me`, {
+      await this.fetch(`https://discord.com/api/guilds/${id}/members/@me`, {
         method: 'PATCH',
         headers: {
           Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN_ID}`,
@@ -238,7 +302,7 @@ export class DiscordProvider extends SocialAbstract implements SocialProvider {
     integration: Integration
   ) {
     const allRoles = await (
-      await fetch(`https://discord.com/api/guilds/${id}/roles`, {
+      await this.fetch(`https://discord.com/api/guilds/${id}/roles`, {
         headers: {
           Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN_ID}`,
           'Content-Type': 'application/json',
@@ -253,7 +317,7 @@ export class DiscordProvider extends SocialAbstract implements SocialProvider {
       .filter((f: any) => f.name !== '@everyone' && f.name !== '@here');
 
     const list = await (
-      await fetch(
+      await this.fetch(
         `https://discord.com/api/guilds/${id}/members/search?query=${data.query}`,
         {
           headers: {
@@ -300,5 +364,48 @@ export class DiscordProvider extends SocialAbstract implements SocialProvider {
       return name;
     }
     return `[[[@${idOrHandle.replace('@', '')}]]]`;
+  }
+
+  override handleErrors(
+    body: string
+  ):
+    | { type: 'refresh-token' | 'bad-body' | 'retry'; value: string }
+    | undefined {
+    if (body.includes('50001')) {
+      return {
+        type: 'bad-body',
+        value: "Bot doesn't have access to this channel",
+      };
+    }
+
+    if (body.includes('50013')) {
+      return {
+        type: 'bad-body',
+        value: 'Bot lacks permission to send messages in this channel',
+      };
+    }
+
+    if (body.includes('10003')) {
+      return {
+        type: 'bad-body',
+        value: 'Channel no longer exists',
+      };
+    }
+
+    if (body.includes('40005')) {
+      return {
+        type: 'bad-body',
+        value: "Attachment exceeds Discord's size limit",
+      };
+    }
+
+    if (body.includes('20028')) {
+      return {
+        type: 'retry',
+        value: 'Rate limited by Discord',
+      };
+    }
+
+    return undefined;
   }
 }

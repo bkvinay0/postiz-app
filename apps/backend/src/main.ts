@@ -1,8 +1,11 @@
 import { initializeSentry } from '@gitroom/nestjs-libraries/sentry/initialize.sentry';
 initializeSentry('backend', true);
+import compression from 'compression';
 
 import { loadSwagger } from '@gitroom/helpers/swagger/load.swagger';
 import { json } from 'express';
+import { Runtime } from '@temporalio/worker';
+Runtime.install({ shutdownSignals: [] });
 
 process.env.TZ = 'UTC';
 
@@ -16,12 +19,19 @@ import { HttpExceptionFilter } from '@gitroom/nestjs-libraries/services/exceptio
 import { ConfigurationChecker } from '@gitroom/helpers/configuration/configuration.checker';
 import { startMcp } from '@gitroom/nestjs-libraries/chat/start.mcp';
 
-async function bootstrap() {
+async function start() {
   const app = await NestFactory.create(AppModule, {
     rawBody: true,
     cors: {
       ...(!process.env.NOT_SECURED ? { credentials: true } : {}),
-      allowedHeaders: ['Content-Type', 'Authorization', 'x-copilotkit-runtime-client-gql-version'],
+      allowedHeaders: [
+        'Content-Type',
+        'Authorization',
+        'auth',
+        'showorg',
+        'impersonate',
+        'x-copilotkit-runtime-client-gql-version',
+      ],
       exposedHeaders: [
         'reload',
         'onboarding',
@@ -45,11 +55,12 @@ async function bootstrap() {
     })
   );
 
-  app.use('/copilot/*', (req: any, res: any, next: any) => {
+  app.use(['/copilot/*', '/posts'], (req: any, res: any, next: any) => {
     json({ limit: '50mb' })(req, res, next);
   });
 
   app.use(cookieParser());
+  app.use(compression());
   app.useGlobalFilters(new SubscriptionExceptionFilter());
   app.useGlobalFilters(new HttpExceptionFilter());
 
@@ -59,6 +70,7 @@ async function bootstrap() {
 
   try {
     await app.listen(port);
+    console.log('Backend started successfully on port ' + port);
 
     checkConfiguration(); // Do this last, so that users will see obvious issues at the end of the startup log without having to scroll up.
 
@@ -80,8 +92,8 @@ function checkConfiguration() {
 
     Logger.warn('Configuration issues found: ' + checker.getIssuesCount());
   } else {
-    Logger.log('Configuration check completed without any issues.');
+    Logger.log('Configuration check completed without any issues');
   }
 }
 
-bootstrap();
+start();

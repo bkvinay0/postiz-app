@@ -9,6 +9,7 @@ import {
   Res,
 } from '@nestjs/common';
 import { GetUserFromRequest } from '@gitroom/nestjs-libraries/user/user.from.request';
+import { sign } from 'jsonwebtoken';
 import { Organization, User } from '@prisma/client';
 import { SubscriptionService } from '@gitroom/nestjs-libraries/database/prisma/subscriptions/subscription.service';
 import { GetOrgFromRequest } from '@gitroom/nestjs-libraries/user/org.from.request';
@@ -22,6 +23,7 @@ import { pricing } from '@gitroom/nestjs-libraries/database/prisma/subscriptions
 import { ApiTags } from '@nestjs/swagger';
 import { UsersService } from '@gitroom/nestjs-libraries/database/prisma/users/users.service';
 import { UserDetailDto } from '@gitroom/nestjs-libraries/dtos/users/user.details.dto';
+import { EmailNotificationsDto } from '@gitroom/nestjs-libraries/dtos/users/email-notifications.dto';
 import { HttpForbiddenException } from '@gitroom/nestjs-libraries/services/exception.filter';
 import { RealIP } from 'nestjs-real-ip';
 import { UserAgent } from '@gitroom/nestjs-libraries/user/user.agent';
@@ -41,6 +43,23 @@ export class UsersController {
     private _userService: UsersService,
     private _trackService: TrackService
   ) {}
+  @Get('/agent-media-sso')
+  async getAgentMediaSsoUrl(
+    @GetUserFromRequest() user: User,
+    @GetOrgFromRequest() organization: Organization
+  ) {
+    if (!process.env.AGENT_MEDIA_SSO_KEY) {
+      throw new HttpException('Agent Media SSO is not configured', 400);
+    }
+
+    const token = sign(
+      { id: organization.id, displayName: organization.name },
+      process.env.AGENT_MEDIA_SSO_KEY
+    );
+
+    return { url: `https://agent-media.ai/sso/${token}` };
+  }
+
   @Get('/self')
   async getSelf(
     @GetUserFromRequest() user: User,
@@ -68,13 +87,14 @@ export class UsersController {
       impersonate: !!impersonate,
       isTrailing: !process.env.STRIPE_PUBLISHABLE_KEY ? false : organization?.isTrailing,
       allowTrial: organization?.allowTrial,
+      streakSince: organization?.streakSince || null,
       // @ts-ignore
       publicApi: organization?.users[0]?.role === 'SUPERADMIN' || organization?.users[0]?.role === 'ADMIN' ? organization?.apiKey : '',
     };
   }
 
   @Get('/personal')
-  async getPersonal(@GetUserFromRequest() user: User) {
+  async getPersonalInformation(@GetUserFromRequest() user: User) {
     return this._userService.getPersonal(user.id);
   }
 
@@ -123,6 +143,25 @@ export class UsersController {
     @Body() body: UserDetailDto
   ) {
     return this._userService.changePersonal(user.id, body);
+  }
+
+  @Get('/email-notifications')
+  async getEmailNotifications(@GetUserFromRequest() user: User) {
+    return this._userService.getEmailNotifications(user.id);
+  }
+
+  @Post('/email-notifications')
+  async updateEmailNotifications(
+    @GetUserFromRequest() user: User,
+    @Body() body: EmailNotificationsDto
+  ) {
+    return this._userService.updateEmailNotifications(user.id, body);
+  }
+
+  @Post('/api-key/rotate')
+  @CheckPolicies([AuthorizationActions.Create, Sections.ADMIN])
+  async rotateApiKey(@GetOrgFromRequest() organization: Organization) {
+    return this._orgService.updateApiKey(organization.id);
   }
 
   @Get('/subscription')
@@ -199,6 +238,7 @@ export class UsersController {
 
   @Post('/logout')
   logout(@Res({ passthrough: true }) response: Response) {
+    response.header('logout', 'true');
     response.cookie('auth', '', {
       domain: getCookieUrlFromDomain(process.env.FRONTEND_URL!),
       ...(!process.env.NOT_SECURED

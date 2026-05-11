@@ -15,12 +15,14 @@ import { LoginUserDto } from '@gitroom/nestjs-libraries/dtos/auth/login.user.dto
 import { AuthService } from '@gitroom/backend/services/auth/auth.service';
 import { ForgotReturnPasswordDto } from '@gitroom/nestjs-libraries/dtos/auth/forgot-return.password.dto';
 import { ForgotPasswordDto } from '@gitroom/nestjs-libraries/dtos/auth/forgot.password.dto';
+import { ResendActivationDto } from '@gitroom/nestjs-libraries/dtos/auth/resend-activation.dto';
 import { ApiTags } from '@nestjs/swagger';
 import { getCookieUrlFromDomain } from '@gitroom/helpers/subdomain/subdomain.management';
 import { EmailService } from '@gitroom/nestjs-libraries/services/email.service';
 import { RealIP } from 'nestjs-real-ip';
 import { UserAgent } from '@gitroom/nestjs-libraries/user/user.agent';
 import { Provider } from '@prisma/client';
+import * as Sentry from '@sentry/nestjs';
 
 @ApiTags('Auth')
 @Controller('/auth')
@@ -101,6 +103,7 @@ export class AuthController {
         }
       }
 
+      Sentry.metrics.count('new_user', 1);
       response.header('onboarding', 'true');
       response.status(200).json({
         register: true,
@@ -196,6 +199,19 @@ export class AuthController {
     };
   }
 
+  @Get('/oauth-mobile-callback')
+  mobileCallback(
+    @Query('code') code: string,
+    @Query('state') state: string,
+    @Res({ passthrough: false }) response: Response
+  ) {
+    const scheme = process.env.MOBILE_APP_SCHEME || 'postiz://auth/callback';
+    const params = new URLSearchParams();
+    if (code) params.set('code', code);
+    if (state) params.set('state', state);
+    return response.redirect(302, `${scheme}?${params.toString()}`);
+  }
+
   @Get('/oauth/:provider')
   async oauthLink(@Param('provider') provider: string, @Query() query: any) {
     return this._authService.oauthLink(provider, query);
@@ -204,9 +220,13 @@ export class AuthController {
   @Post('/activate')
   async activate(
     @Body('code') code: string,
+    @Body('datafast_visitor_id') datafast_visitor_id: string,
     @Res({ passthrough: false }) response: Response
   ) {
-    const activate = await this._authService.activate(code);
+    const activate = await this._authService.activate(
+      code,
+      datafast_visitor_id
+    );
     if (!activate) {
       return response.status(200).json({ can: false });
     }
@@ -232,13 +252,33 @@ export class AuthController {
     return response.status(200).json({ can: true });
   }
 
+  @Post('/resend-activation')
+  async resendActivation(@Body() body: ResendActivationDto) {
+    try {
+      await this._authService.resendActivationEmail(body.email);
+      return {
+        success: true,
+      };
+    } catch (e: any) {
+      return {
+        success: false,
+        message: e.message,
+      };
+    }
+  }
+
   @Post('/oauth/:provider/exists')
   async oauthExists(
     @Body('code') code: string,
+    @Body('redirect_uri') redirect_uri: string,
     @Param('provider') provider: string,
     @Res({ passthrough: false }) response: Response
   ) {
-    const { jwt, token } = await this._authService.checkExists(provider, code);
+    const { jwt, token } = await this._authService.checkExists(
+      provider,
+      code,
+      redirect_uri
+    );
 
     if (token) {
       return response.json({ token });

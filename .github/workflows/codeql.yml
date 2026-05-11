@@ -1,14 +1,16 @@
 ---
-name: "Code Quality  Analysis"
+name: "Code Quality Analysis"
 
 on:
   push:
     branches:
-      - dev1
+      - main
     paths:
       - apps/**
       - '!apps/docs/**'
       - libraries/**
+  merge_group:
+
 
 jobs:
   analyze:

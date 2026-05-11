@@ -17,9 +17,11 @@ import clsx from 'clsx';
 import { EventEmitter } from 'events';
 
 interface OpenModalInterface {
-  title?: string;
+  title?: any;
   closeOnClickOutside?: boolean;
   removeLayout?: boolean;
+  fullScreen?: boolean;
+  top?: string | number;
   closeOnEscape?: boolean;
   withCloseButton?: boolean;
   askClose?: boolean;
@@ -29,6 +31,7 @@ interface OpenModalInterface {
     modal?: string;
   };
   size?: string | number;
+  maxSize?: string | number;
   height?: string | number;
   id?: string;
 }
@@ -131,14 +134,25 @@ export const Component: FC<{
       <div
         style={{ zIndex }}
         className={clsx(
-          'fixed flex left-0 top-0 min-w-full min-h-full bg-popup transition-all animate-fadeIn overflow-y-auto pb-[50px] text-newTextColor',
+          !modal.fullScreen
+            ? 'pb-[50px] min-w-full min-h-full'
+            : 'w-full h-full',
+          'fixed flex left-0 top-0 bg-popup transition-all animate-fadeIn overflow-y-auto text-newTextColor',
           !isLast && '!overflow-hidden'
         )}
       >
-        <div className="relative flex-1">
-          <div className="absolute top-0 left-0 min-w-full min-h-full">
+        <div className={clsx(modal.fullScreen && 'flex', 'relative flex-1')}>
+          <div
+            className={clsx(
+              modal.fullScreen
+                ? 'flex flex-1'
+                : 'absolute top-0 left-0 min-w-full min-h-full'
+            )}
+          >
             <div
-              className="mx-auto py-[48px]"
+              className={clsx(
+                modal.fullScreen ? 'w-full h-full flex-1' : 'mx-auto py-[48px]'
+              )}
               {...(modal.size && { style: { width: modal.size } })}
             >
               {typeof modal.children === 'function'
@@ -156,17 +170,44 @@ export const Component: FC<{
       <div
         onClick={closeModalFunction}
         style={{ zIndex }}
-        className="fixed flex left-0 top-0 min-w-full min-h-full bg-popup transition-all animate-fadeIn overflow-y-auto pb-[50px] text-newTextColor"
+        className={clsx(
+          'fixed flex left-0 top-0 min-w-full min-h-full bg-popup transition-all animate-fadeIn overflow-y-auto text-newTextColor',
+          !modal.fullScreen && 'pb-[50px]'
+        )}
       >
         <div className="relative flex-1">
-          <div className="absolute top-0 left-0 min-w-full min-h-full pt-[100px] pb-[100px]">
+          <div
+            style={
+              modal.top
+                ? { paddingTop: modal.top, paddingBottom: modal.top }
+                : {}
+            }
+            className={clsx(
+              'absolute min-w-full',
+              !modal.fullScreen
+                ? modal.top
+                  ? ''
+                  : 'min-h-full pt-[100px] pb-[100px]'
+                : 'h-screen',
+              modal.size && modal.height
+                ? 'flex justify-center items-center'
+                : 'top-0 left-0'
+            )}
+          >
             <div
               className={clsx(
                 !modal.removeLayout && 'gap-[40px] p-[32px]',
                 'bg-newBgColorInner mx-auto flex flex-col w-fit rounded-[24px] relative',
-                modal.size ? '' : 'min-w-[600px]'
+                modal.size ? '' : 'min-w-[600px]',
+                modal.fullScreen && 'h-full'
               )}
-              {...(modal.size && { style: { width: modal.size } })}
+              {...((!!modal.size || !!modal.height || !!modal.maxSize) && {
+                style: {
+                  ...(modal.size ? { width: modal.size } : {}),
+                  ...(modal.height ? { height: modal.height } : {}),
+                  ...(modal.maxSize ? { maxWidth: modal.maxSize } : {}),
+                },
+              })}
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center">
@@ -199,7 +240,14 @@ export const Component: FC<{
                   </div>
                 ) : null}
               </div>
-              <div className="whitespace-pre-line">{RenderComponent}</div>
+              <div
+                className={clsx(
+                  'whitespace-pre-line',
+                  !!modal.height && !!modal.size && 'flex flex-1 flex-col'
+                )}
+              >
+                {RenderComponent}
+              </div>
             </div>
           </div>
         </div>
@@ -287,8 +335,9 @@ export const DecisionModal: FC<{
   description: string;
   approveLabel: string;
   cancelLabel: string;
+  onlyApprove: boolean;
   resolution: (value: boolean) => void;
-}> = ({ description, cancelLabel, approveLabel, resolution }) => {
+}> = ({ description, cancelLabel, approveLabel, resolution, onlyApprove }) => {
   const { closeCurrent } = useModals();
   return (
     <div className="flex flex-col">
@@ -302,14 +351,16 @@ export const DecisionModal: FC<{
         >
           {approveLabel}
         </Button>
-        <Button
-          onClick={() => {
-            resolution(false);
-            closeCurrent();
-          }}
-        >
-          {cancelLabel}
-        </Button>
+        {!onlyApprove && (
+          <Button
+            onClick={() => {
+              resolution(false);
+              closeCurrent();
+            }}
+          >
+            {cancelLabel}
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -348,6 +399,7 @@ export const useDecisionModal = () => {
     ({
       title = 'Are you sure?',
       description = 'Are you sure you want to close this modal?' as any,
+      onlyApprove = false,
       approveLabel = 'Yes',
       cancelLabel = 'No',
       newRes = undefined as any,
@@ -359,6 +411,7 @@ export const useDecisionModal = () => {
           onClose: () => res(false),
           children: (
             <DecisionModal
+              onlyApprove={onlyApprove}
               resolution={(value) => (newRes ? newRes(value) : res(value))}
               description={description}
               approveLabel={approveLabel}

@@ -8,13 +8,14 @@ export const initializeSentryClient = (environment: string, dsn: string) =>
       Sentry.browserTracingIntegration(),
       Sentry.browserProfilingIntegration(),
       Sentry.replayIntegration({
-        maskAllText: true,
+        maskAllText: false,
         maskAllInputs: true,
       }),
       Sentry.feedbackIntegration({
         // Disable the injection of the default widget
         autoInject: false,
       }),
+      Sentry.replayCanvasIntegration(),
     ],
     replaysSessionSampleRate: 1.0,
     replaysOnErrorSampleRate: 1.0,

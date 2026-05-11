@@ -10,8 +10,6 @@ COPY . .
 
 RUN pnpm install --frozen-lockfile
 
-RUN pnpm add -g @nestjs/cli
-
 RUN pnpm run build:backend
 
 EXPOSE 3000
